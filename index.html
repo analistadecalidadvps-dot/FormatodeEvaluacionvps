@@ -4463,23 +4463,19 @@
             const apiUrl = getReportApiUrl();
             if (!apiUrl) throw new Error("BACKEND_NOT_CONFIGURED");
 
-            // Primero comprobamos que la Web App sea realmente pública y responda.
+            // Comprobar que el servicio responde; guardar con la sesión de Google.
             await verifyBackendHealth();
 
-            await fetch(apiUrl, {
-                method: "POST",
-                mode: "no-cors",
-                headers: { "Content-Type": "text/plain;charset=utf-8" },
-                body: JSON.stringify({ action: "saveReport", reportId, payload })
-            });
+            await postToAppsScriptViaForm({ action: "saveReport", reportId, payload });
 
             // No confiamos en el POST opaco: verificamos que el ID exista de verdad en Sheets.
-            await new Promise(r => setTimeout(r, 700));
-            const verify = await jsonpRequest('getReport', { id: reportId });
-            if (!verify || !verify.ok || !verify.payload) {
-                throw new Error((verify && verify.error) || "REPORT_NOT_SAVED");
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const verify = await jsonpRequest('getReport', { id: reportId });
+                if (!verify?.ok) throw new Error(verify?.error || "REPORT_NOT_SAVED");
+                if (verify.payload && JSON.stringify(verify.payload) === JSON.stringify(payload)) return verify;
+                if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
             }
-            return verify;
+            throw new Error("La nube no confirmó el contenido del resumen.");
         }
 
         async function generateAgencyShareableLink(event) {
@@ -4532,7 +4528,7 @@
                 }
             } catch (error) {
                 console.error("Error creando enlace corto:", error);
-                alert("No fue posible guardar el reporte para generar la liga corta. Verifica el despliegue de Apps Script.");
+                alert("No se confirmó el guardado del resumen. Revisa tu acceso y vuelve a intentarlo.\n\n" + error.message);
             } finally {
                 if (button) { button.disabled = false; button.innerHTML = original; }
             }
