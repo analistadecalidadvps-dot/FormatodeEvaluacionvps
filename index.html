@@ -5534,5 +5534,41 @@
             if (year) { const el = document.getElementById('meta-anio'); if (el && [...el.options].some(o => o.value === year)) el.value = year; }
         });
 </script>
+<style>
+[hidden]{display:none!important}
+#qa-account-bar{padding:12px 20px;background:#172554;color:white;display:flex;gap:12px;align-items:center;flex-wrap:wrap}#qa-account-bar button,#qa-login button,#qa-users button{padding:9px 16px;border-radius:8px;background:#2563eb;color:white;border:0;cursor:pointer}#qa-login{position:fixed;inset:0;background:#f1f5f9;z-index:20000;display:grid;place-items:center}#qa-login section{max-width:480px;background:white;padding:32px;border-radius:16px;box-shadow:0 6px 30px #0002}#qa-users{width:min(800px,92vw);max-height:85vh;overflow:auto;border:0;border-radius:16px;padding:24px}#qa-users::backdrop{background:#0008}#qa-users input,#qa-users select{border:1px solid #cbd5e1;border-radius:6px;padding:8px;width:100%}#qa-users label{display:block;margin-top:12px}#qa-users table{width:100%;margin:18px 0;border-collapse:collapse}#qa-users td,#qa-users th{text-align:left;padding:8px;border-bottom:1px solid #ddd}#qa-users-message{white-space:pre-wrap}
+</style>
+<div id="qa-account-bar" hidden><span id="qa-account-text"></span><button id="qa-open-users" hidden>Compañeros</button></div>
+<div id="qa-login" hidden><section><h1>Bienvenido a VENTO QA</h1><p>Ingresa con la cuenta de Google que tu administrador dio de alta.</p><p id="qa-login-message" role="status">Comprobando tu acceso…</p><a id="qa-google-login" target="_blank" rel="noopener">Iniciar sesión con Google</a><p>La primera vez, Google puede pedirte autorizar el formato. Después vuelve aquí y pulsa Continuar.</p><button id="qa-login-retry">Continuar</button></section></div>
+<script>
+(()=>{
+ const params=new URLSearchParams(location.search);
+ if(params.has('s')||params.has('id')||params.has('r')) return;
+ const el=id=>document.getElementById(id);
+ let access=null,nonce='',users=[];
+ el('qa-google-login').href=getReportApiUrl()+'?action=getAccess';
+ el('qa-login').hidden=false;
+ async function checkAccess(){
+  el('qa-login-retry').disabled=true;el('qa-login-message').textContent='Comprobando tu acceso…';
+  try{
+   const result=await jsonpRequest('getAccess',{},20000);
+   if(!result?.ok) throw Error(result?.error||'No se pudo comprobar el acceso.');
+   access=result;el('qa-login').hidden=true;el('qa-account-bar').hidden=false;
+   document.body.prepend(el('qa-account-bar'));
+   el('qa-account-text').textContent=result.email+' · '+({ADMIN:'Administrador',EVALUADOR:'Evaluador',CONSULTA:'Consulta'}[result.role]||'');
+   el('qa-open-users').hidden=result.role!=='ADMIN';
+   if(!result.canWrite){
+    document.querySelectorAll('input,textarea,select,[contenteditable="true"]').forEach(x=>{if(x.closest('#qa-users') || ['meta-agencia','meta-mes','meta-anio'].includes(x.id))return;if(x.isContentEditable)x.contentEditable='false';else x.disabled=true;});
+    document.querySelectorAll('button').forEach(x=>{if(/guardar|generar enlace|limpiar|restaurar respaldo/i.test(x.textContent))x.disabled=true;});
+   }
+  }catch(e){el('qa-login-message').textContent='No pudimos comprobar tu acceso. Inicia sesión con tu cuenta autorizada y vuelve a pulsar Continuar. '+(e.message||'');}
+  finally{el('qa-login-retry').disabled=false;}
+ }
+ el('qa-login-retry').onclick=checkAccess;
+ el('qa-open-users').onclick=()=>window.open(getReportApiUrl()+'?action=manageUsers','_blank','noopener');
+ checkAccess();
+})();
+</script>
+
 </body>
 </html>
