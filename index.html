@@ -5553,7 +5553,7 @@
   try{
    const result=await jsonpRequest('getAccess',{},20000);
    if(!result?.ok) throw Error(result?.error||'No se pudo comprobar el acceso.');
-   access=result;el('qa-login').hidden=true;el('qa-account-bar').hidden=false;
+   access=result;const qa=document.getElementById('meta-qa');if(qa){(result.evaluatorNames||[]).forEach(name=>{if(!Array.from(qa.options).some(o=>o.value===name))qa.add(new Option(name,name));});if(result.name && !new URLSearchParams(location.search).has('qaEvaluador') && !document.getElementById('meta-agencia').value)qa.value=result.name;}el('qa-login').hidden=true;el('qa-account-bar').hidden=false;
    document.body.prepend(el('qa-account-bar'));
    el('qa-account-text').textContent=result.email+' · '+({ADMIN:'Administrador',EVALUADOR:'Evaluador',CONSULTA:'Consulta'}[result.role]||'');
    el('qa-open-users').hidden=result.role!=='ADMIN';
