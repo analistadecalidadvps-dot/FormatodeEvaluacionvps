@@ -3924,6 +3924,7 @@
 
         function schedulePermanentDraftSave() {
             if (restoringPermanentDraft || draftReadyAgency !== document.getElementById('meta-agencia')?.value?.trim()) return;
+            if (!draftDirty && !draftHasEvaluationData(buildPermanentDraftSnapshot())) return;
             draftDirty = true;
             clearTimeout(permanentDraftTimer);
             permanentDraftTimer = setTimeout(savePermanentDraft, 1200);
