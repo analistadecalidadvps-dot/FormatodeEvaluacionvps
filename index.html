@@ -3814,6 +3814,44 @@
         let permanentDraftTimer = null;
         let restoringPermanentDraft = false;
         let lastDraftAgencyLoaded = '';
+        let draftLoadSequence = 0;
+        let draftReadyAgency = '';
+        let draftDirty = false;
+        let draftSaveQueue = Promise.resolve();
+
+        function draftHasEvaluationData(draft) {
+            if (!draft?.fields || !draft?.evalState) return false;
+            const f = draft.fields;
+            return !!String(f['meta-asesor']?.value || '').trim()
+                || !!String(f['comments-calidad']?.value || '').trim()
+                || Object.entries(f).some(([id,v]) => /^meta-(video|cotizacion)-url/.test(id) && String(v?.value || '').trim())
+                || Object.values(draft.evalState).some(v => v.comment || (v.status && v.status !== 'Cumple'));
+        }
+
+        function chooseDraftToRestore(localDraft, cloudDraft, preferCloud) {
+            if (cloudDraft && preferCloud) return cloudDraft;
+            if (cloudDraft && !draftHasEvaluationData(localDraft)) return cloudDraft;
+            const candidates = [localDraft, cloudDraft].filter(d => d?.fields && d?.evalState);
+            candidates.sort((a,b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0));
+            return candidates[0] || null;
+        }
+
+        async function persistDraftAndConfirm(draft) {
+            await postToAppsScriptViaForm({ action:'saveDraft', agencia:draft.agencia, payload:draft });
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const res = await jsonpRequest('getDraft', { agencia:draft.agencia }, 15000);
+                if (!res?.ok) throw new Error(res?.error || 'No se pudo consultar el borrador guardado.');
+                if (res.found && res.payload && JSON.stringify(res.payload) === JSON.stringify(draft)) return true;
+                if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            throw new Error('La nube no confirmó este borrador.');
+        }
+
+        function queueDraftSave(draft) {
+            const pending = draftSaveQueue.catch(() => {}).then(() => persistDraftAndConfirm(draft));
+            draftSaveQueue = pending;
+            return pending;
+        }
 
         function getDraftStorageKey(agencia) {
             return `vento_qa_draft_${String(agencia || '').trim()}`;
@@ -3876,46 +3914,59 @@
         }
 
         function schedulePermanentDraftSave() {
-            if (restoringPermanentDraft) return;
+            if (restoringPermanentDraft || draftReadyAgency !== document.getElementById('meta-agencia')?.value?.trim()) return;
+            draftDirty = true;
             clearTimeout(permanentDraftTimer);
             permanentDraftTimer = setTimeout(savePermanentDraft, 1200);
         }
 
         async function savePermanentDraft() {
-            if (restoringPermanentDraft) return;
+            if (restoringPermanentDraft || !draftDirty) return;
             const draft = buildPermanentDraftSnapshot();
-            if (!draft) return;
+            if (!draft || draftReadyAgency !== draft.agencia) return;
             try { localStorage.setItem(getDraftStorageKey(draft.agencia), JSON.stringify(draft)); } catch(e) {}
-            const apiUrl = getReportApiUrl();
-            if (!apiUrl) return;
             try {
-                await postToAppsScriptViaForm({ action:'saveDraft', agencia:draft.agencia, payload:draft });
+                await queueDraftSave(draft);
             } catch(e) {
-                console.warn('No se pudo sincronizar borrador en nube; permanece respaldo local.', e);
+                console.warn('No se confirmó borrador en nube:', e);
+                showDraftNotice('Borrador en este equipo; guardado en nube NO confirmado. Usa Guardar borrador para reintentar.');
             }
         }
 
-        async function loadDraftForAgency(agencia) {
+        async function loadDraftForAgency(agencia, forceCloud = false) {
             agencia = String(agencia || '').trim();
             if (!agencia || !AGENCIA_CATALOG.some(a => a.id === agencia)) return;
-            if (lastDraftAgencyLoaded === agencia) return;
-            lastDraftAgencyLoaded = agencia;
-
+            if (!forceCloud && lastDraftAgencyLoaded === agencia) return;
+            const sequence = ++draftLoadSequence;
+            clearTimeout(permanentDraftTimer);
+            draftReadyAgency = '';
+            draftDirty = false;
             let localDraft = null;
             try { localDraft = JSON.parse(localStorage.getItem(getDraftStorageKey(agencia)) || 'null'); } catch(e) {}
-            let cloudDraft = null;
+            let res;
             try {
-                const res = await jsonpRequest('getDraft', { agencia }, 9000);
-                if (res && res.ok && res.found && res.payload) cloudDraft = res.payload;
-            } catch(e) { console.warn('Borrador nube no disponible; se usará respaldo local si existe.', e); }
-
-            const candidates = [localDraft, cloudDraft].filter(Boolean);
-            if (!candidates.length) return;
-            candidates.sort((a,b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0));
-            const chosen = candidates[0];
-            if (applyPermanentDraftSnapshot(chosen)) {
+                res = await jsonpRequest('getDraft', { agencia }, 20000);
+                if (!res?.ok) throw new Error(res?.error || 'Respuesta de nube inválida.');
+                if (res.found && (!res.payload?.fields || !res.payload?.evalState)) throw new Error('El borrador recibido no tiene el formato esperado.');
+            } catch(e) {
+                if (sequence !== draftLoadSequence) return;
+                lastDraftAgencyLoaded = '';
+                showDraftNotice('No se recuperó el borrador de la nube. Autoriza tu cuenta y pulsa Recuperar borrador. No guardes un formulario incompleto.');
+                console.error('Recuperación de borrador:',e);
+                return;
+            }
+            if (sequence !== draftLoadSequence || agencia !== document.getElementById('meta-agencia')?.value?.trim()) return;
+            const cloudDraft = res.found ? res.payload : null;
+            const fromAssignment = new URLSearchParams(window.location.search).has('qaAgencia');
+            const chosen = chooseDraftToRestore(forceCloud ? null : localDraft, cloudDraft, forceCloud || fromAssignment);
+            if (chosen && !applyPermanentDraftSnapshot(chosen)) return;
+            draftReadyAgency = agencia;
+            lastDraftAgencyLoaded = agencia;
+            if (chosen) {
                 const saved = chosen.savedAt ? new Date(chosen.savedAt).toLocaleString('es-MX') : '';
-                showDraftNotice(`Borrador recuperado automáticamente${saved ? ` · ${saved}` : ''}`);
+                showDraftNotice(`Borrador recuperado ${chosen === cloudDraft ? 'de la nube' : 'de este equipo'}${saved ? ` · ${saved}` : ''}`);
+            } else {
+                showDraftNotice(forceCloud ? 'No hay un borrador en la nube para esta agencia.' : 'Agencia lista; no hay borrador guardado.');
             }
         }
 
@@ -3962,7 +4013,7 @@
                 schedulePermanentDraftSave();
             });
             window.addEventListener('beforeunload', () => {
-                const draft = buildPermanentDraftSnapshot();
+                const draft = draftDirty && draftReadyAgency === document.getElementById('meta-agencia')?.value?.trim() ? buildPermanentDraftSnapshot() : null;
                 if (draft) { try { localStorage.setItem(getDraftStorageKey(draft.agencia), JSON.stringify(draft)); } catch(e) {} }
             });
         }
@@ -4088,15 +4139,30 @@
                 setTimeout(finish,8000);
             });
         }
-        async function saveDraftManually(){
-            const draft=buildPermanentDraftSnapshot(); if(!draft){alert('Selecciona primero una agencia válida.');return;}
+        async function saveDraftManually(event){
+            const draft=buildPermanentDraftSnapshot();
+            if(!draft){alert('Selecciona primero una agencia válida.');return;}
+            if(draftReadyAgency !== draft.agencia){alert('Primero pulsa Recuperar borrador y comprueba la conexión. No se enviará un formulario incompleto.');return;}
+            clearTimeout(permanentDraftTimer);
+            draftDirty = true;
             localStorage.setItem(getDraftStorageKey(draft.agencia),JSON.stringify(draft));
-            try{await postToAppsScriptViaForm({action:'saveDraft',agencia:draft.agencia,payload:draft});}catch(e){}
-            showDraftNotice('Borrador guardado.');
+            const button = event?.currentTarget;
+            if (button) button.disabled = true;
+            showDraftNotice('Comprobando guardado en nube…');
+            try {
+                await queueDraftSave(draft);
+                showDraftNotice('Borrador guardado y confirmado en la nube.');
+            } catch(e) {
+                alert('El borrador se conservó en este equipo, pero NO se confirmó en la nube. No cierres esta pestaña.\n\n'+e.message);
+            } finally { if (button) button.disabled = false; }
         }
         async function restoreDraftManually(){
-            const agencia=document.getElementById('meta-agencia')?.value?.trim()||''; if(!agencia){alert('Selecciona primero la agencia.');return;}
-            lastDraftAgencyLoaded=''; await loadDraftForAgency(agencia);
+            const agencia=document.getElementById('meta-agencia')?.value?.trim()||'';
+            if(!agencia){alert('Selecciona primero la agencia.');return;}
+            clearTimeout(permanentDraftTimer);
+            if (draftDirty && !confirm('Se recuperará el borrador de la nube. ¿Deseas reemplazar lo que aparece en esta pantalla?')) return;
+            lastDraftAgencyLoaded='';
+            await loadDraftForAgency(agencia, true);
         }
 
         // Folio único por video. Nunca crear un folio nuevo si el video ya está vinculado.
