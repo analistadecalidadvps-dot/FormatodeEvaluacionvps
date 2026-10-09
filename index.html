@@ -24,6 +24,7 @@
         // Después de desplegar Code.gs como Web App, pega aquí la URL terminada en /exec.
         // Ejemplo: https://script.google.com/macros/s/AKfycbych3vXLKz1GcSeM8yqdE_u-seEDCzaQPJzCJQGQKEWPE9gcVoTBC6MgKSbTcNr0FLr/exec
         const VENTO_REPORT_API_URL = "https://script.google.com/macros/s/AKfycbync04mxLTEz4Ux4UoWNHNQOZnVPzHdoAhOtyRC-FkpGPz_221FL7Z6npFJOCY9r8uK/exec";
+        const VENTO_PUBLIC_SUMMARY_API_URL = "https://script.google.com/macros/s/AKfycbzDhbrrPfhnOAp-hfa-dGI5rD1a5XD1rsAdBB9PFO1HSO1_nBjssHp0m2QMGNpIR9qX/exec";
 
         tailwind.config = {
             theme: {
@@ -3768,8 +3769,8 @@
             };
         }
 
-        function jsonpRequest(action, params = {}, timeoutMs = 15000) {
-            const apiUrl = getReportApiUrl();
+        function jsonpRequest(action, params = {}, timeoutMs = 15000, apiOverride = '') {
+            const apiUrl = apiOverride || getReportApiUrl();
             return new Promise((resolve, reject) => {
                 if (!apiUrl) return reject(new Error("BACKEND_NOT_CONFIGURED"));
                 const callbackName = `ventoApi_${Date.now()}_${Math.floor(Math.random()*100000)}`;
@@ -4504,7 +4505,8 @@
                 r: formData.regional, d: formData.distrital, rg: formData.region, dt: formData.distrito,
                 ga: formData.gerenteAgencia, fs: formData.fechaSesion, la: formData.ligaAcceso,
                 v: formData.videoUrls, ctz: formData.cotizacionUrls,
-                cc: formData.comentariosCalidad, cch: formData.comentariosCalidadHtml, sc: formData.calificacion, i: compactItems
+                cc: formData.comentariosCalidad, cch: formData.comentariosCalidadHtml, sc: formData.calificacion, i: compactItems,
+                publicAccessToken: Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2,'0')).join('')
             };
 
             const reportId = createShortReportId();
@@ -4518,7 +4520,7 @@
             try {
                 await saveShortReport(reportId, payload);
                 const currentBaseUrl = window.location.href.split('?')[0].split('#')[0];
-                const shareableUrl = `${currentBaseUrl}?id=${encodeURIComponent(reportId)}`;
+                const shareableUrl = `${currentBaseUrl}?id=${encodeURIComponent(reportId)}&token=${payload.publicAccessToken}`;
                 const resultBox = document.getElementById("agency-link-result");
                 const outputInput = document.getElementById("shareable-url-output");
                 if (resultBox && outputInput) {
@@ -4590,7 +4592,10 @@
 
         async function loadReportById(reportId) {
             try {
-                const response = await jsonpRequest('getReport', { id: reportId });
+                const token = new URLSearchParams(window.location.search).get('token');
+                const response = token
+                    ? await jsonpRequest('getReport', { id: reportId, token }, 20000, VENTO_PUBLIC_SUMMARY_API_URL)
+                    : await jsonpRequest('getReport', { id: reportId });
                 if (!response || !response.ok || !response.payload) {
                     renderReportLoadError((response && response.error) || "Reporte no encontrado o inactivo.");
                     return;
