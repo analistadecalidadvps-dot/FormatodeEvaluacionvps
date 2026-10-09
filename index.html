@@ -4506,7 +4506,7 @@
                 ga: formData.gerenteAgencia, fs: formData.fechaSesion, la: formData.ligaAcceso,
                 v: formData.videoUrls, ctz: formData.cotizacionUrls,
                 cc: formData.comentariosCalidad, cch: formData.comentariosCalidadHtml, sc: formData.calificacion, i: compactItems,
-                publicAccessToken: Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2,'0')).join('')
+                publicAccessToken: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')
             };
 
             const reportId = createShortReportId();
@@ -4520,7 +4520,7 @@
             try {
                 await saveShortReport(reportId, payload);
                 const currentBaseUrl = window.location.href.split('?')[0].split('#')[0];
-                const shareableUrl = `${currentBaseUrl}?id=${encodeURIComponent(reportId)}&token=${payload.publicAccessToken}`;
+                const shareableUrl = `${currentBaseUrl}?s=${payload.publicAccessToken}`;
                 const resultBox = document.getElementById("agency-link-result");
                 const outputInput = document.getElementById("shareable-url-output");
                 if (resultBox && outputInput) {
@@ -4619,8 +4619,18 @@
             </div>`;
         }
 
-        function checkShareableReportMode() {
+        async function checkShareableReportMode() {
             const urlParams = new URLSearchParams(window.location.search);
+
+            const sharedKey = urlParams.get('s');
+            if (sharedKey) {
+                try {
+                    const response = await jsonpRequest('getReport', {token:sharedKey}, 20000, VENTO_PUBLIC_SUMMARY_API_URL);
+                    if (!response?.ok || !response.payload) renderReportLoadError(response?.error || 'Resumen no disponible.');
+                    else renderAgencyReadOnlyReport(response.payload);
+                } catch(e) { renderReportLoadError('No fue posible conectar con el servicio de resúmenes.'); }
+                return;
+            }
 
             // Producción: el enlace solo transporta un ID corto.
             const reportId = urlParams.get("id");
