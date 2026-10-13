@@ -533,7 +533,7 @@
 
     <script>
         // --- 1. FULL AGENCIES CATALOG & METADATA MAPPING ---
-        const AGENCIA_CATALOG = [
+        let AGENCIA_CATALOG = [
     {
         "id": "16001 Rojo Gomez Cmx",
         "distrital": "Vanesa Mondragon Salgado",
@@ -3044,6 +3044,7 @@
                 .trim();
         }
 
+        let qaDirectoryHistoricalLoaded=false;
         let agencyActiveIndex = -1;
         let currentAgencyMatches = [];
 
@@ -3056,7 +3057,8 @@
             const normalized = normalizeAgencySearch(query);
             const tokens = normalized.split(" ").filter(Boolean);
             const matches = AGENCIA_CATALOG.filter(agency => {
-                const searchable = normalizeAgencySearch(`${agency.id} ${agency.distrital || ""} ${agency.regional || ""} ${agency.region || ""} ${agency.distrito || ""}`);
+                if(agency.activo===false)return false;
+                const searchable = normalizeAgencySearch(`${agency.id} ${agency.nombre || ""} ${agency.distrital || ""} ${agency.regional || ""} ${agency.region || ""} ${agency.distrito || ""}`);
                 return tokens.every(token => searchable.includes(token));
             });
             return matches.slice(0, 80);
@@ -3076,7 +3078,7 @@
                     <button type="button" data-agency-index="${idx}"
                             onmousedown="event.preventDefault(); selectAgencyFromSearchByIndex(${idx})"
                             class="agency-suggestion w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-slate-100 last:border-b-0 focus:outline-none focus:bg-blue-50">
-                        <div class="font-bold text-sm text-slate-900">${escapeHtml(agency.id)}</div>
+                        <div class="font-bold text-sm text-slate-900">${escapeHtml(agency.codigo && agency.nombre ? agency.codigo+" "+agency.nombre : agency.id)}</div>
                         <div class="text-[11px] text-slate-500 mt-0.5">Distrito ${escapeHtml(agency.distrito)} · Región ${escapeHtml(agency.region)} · ${escapeHtml(agency.distrital)}</div>
                     </button>`).join("");
             }
@@ -3143,6 +3145,7 @@
                 distritalEl.value = agency.distrital || "";
                 regionEl.value = agency.region ?? "";
                 distritoEl.value = agency.distrito ?? "";
+                const manager=document.getElementById("meta-gerente-agencia");if(manager)manager.value=agency.gerente||"";
             } else {
                 regionalEl.value = "";
                 distritalEl.value = "";
@@ -3903,7 +3906,7 @@
                     else if ('value' in saved) el.value = saved.value ?? '';
                 });
                 setQaEditorHtml(document.getElementById('comments-calidad')?.value || '');
-                autoFillAgencyData();
+                qaDirectoryHistoricalLoaded=true;
                 RUBROS_DATA.forEach(rubro => rubro.items.forEach(item => {
                     const saved = draft.evalState[item.id] || { status:'Cumple', comment:'' };
                     const status = ['Cumple','No Cumple','No Aplica'].includes(saved.status) ? saved.status : 'Cumple';
@@ -4237,7 +4240,7 @@
                 }));
                 if (data.comentariosCalidadHtml) setQaEditorHtml(data.comentariosCalidadHtml);
                 else if(data.comentariosCalidad) setQaEditorHtml(data.comentariosCalidad);
-                autoFillAgencyData();
+                qaDirectoryHistoricalLoaded=true;
                 calculateTotalScore();
             }
             activeEvaluationId = evaluationId;
@@ -5580,7 +5583,7 @@ window.addEventListener('load',()=>{
 [hidden]{display:none!important}
 #qa-account-bar{padding:12px 20px;background:#172554;color:white;display:flex;gap:12px;align-items:center;flex-wrap:wrap}#qa-account-bar button,#qa-login button,#qa-users button{padding:9px 16px;border-radius:8px;background:#2563eb;color:white;border:0;cursor:pointer}#qa-login{position:fixed;inset:0;background:#f1f5f9;z-index:20000;display:grid;place-items:center}#qa-login section{max-width:480px;background:white;padding:32px;border-radius:16px;box-shadow:0 6px 30px #0002}#qa-users{width:min(800px,92vw);max-height:85vh;overflow:auto;border:0;border-radius:16px;padding:24px}#qa-users::backdrop{background:#0008}#qa-users input,#qa-users select{border:1px solid #cbd5e1;border-radius:6px;padding:8px;width:100%}#qa-users label{display:block;margin-top:12px}#qa-users table{width:100%;margin:18px 0;border-collapse:collapse}#qa-users td,#qa-users th{text-align:left;padding:8px;border-bottom:1px solid #ddd}#qa-users-message{white-space:pre-wrap}
 </style>
-<div id="qa-account-bar" hidden><span id="qa-account-text"></span><button id="qa-open-users" hidden>Compañeros</button></div>
+<div id="qa-account-bar" hidden><span id="qa-account-text"></span><button id="qa-open-users" hidden>Compañeros</button><button id="qa-open-directory" hidden>Directorio</button></div>
 <div id="qa-login" hidden><section><h1>Bienvenido a VENTO QA</h1><p>Ingresa con la cuenta de Google que tu administrador dio de alta.</p><p id="qa-login-message" role="status">Comprobando tu acceso…</p><a id="qa-google-login" target="_blank" rel="noopener">Iniciar sesión con Google</a><p>La primera vez, Google puede pedirte autorizar el formato. Después vuelve aquí y pulsa Continuar.</p><button id="qa-login-retry">Continuar</button></section></div>
 <script>
 (()=>{
@@ -5595,10 +5598,11 @@ window.addEventListener('load',()=>{
   try{
    const result=await jsonpRequest('getAccess',{},20000);
    if(!result?.ok) throw Error(result?.error||'No se pudo comprobar el acceso.');
+   const directory=await jsonpRequest('getAgencyDirectory',{},20000);if(!directory?.ok||!Array.isArray(directory.agencies)||!directory.agencies.length)throw Error(directory?.error||'No se pudo cargar el directorio actualizado.');AGENCIA_CATALOG=directory.agencies;const agencyInput=document.getElementById('meta-agencia');const linkedAgency=new URLSearchParams(location.search).get('qaAgencia');if(!agencyInput.value&&linkedAgency&&AGENCIA_CATALOG.some(a=>a.id===linkedAgency))selectAgencyFromSearch(linkedAgency);else if(agencyInput.value&&!qaDirectoryHistoricalLoaded&&!activeEvaluationSaved)autoFillAgencyData();
    access=result;const qa=document.getElementById('meta-qa');if(qa){(result.evaluatorNames||[]).forEach(name=>{if(!Array.from(qa.options).some(o=>o.value===name))qa.add(new Option(name,name));});if(result.name && !new URLSearchParams(location.search).has('qaEvaluador') && !document.getElementById('meta-agencia').value)qa.value=result.name;}el('qa-login').hidden=true;el('qa-account-bar').hidden=false;
    document.body.prepend(el('qa-account-bar'));
    el('qa-account-text').textContent=result.email+' · '+({ADMIN:'Administrador',EVALUADOR:'Evaluador',CONSULTA:'Consulta'}[result.role]||'');
-   el('qa-open-users').hidden=result.role!=='ADMIN';
+   el('qa-open-users').hidden=result.role!=='ADMIN';el('qa-open-directory').hidden=result.role!=='ADMIN';
    if(!result.canWrite){
     document.querySelectorAll('input,textarea,select,[contenteditable="true"]').forEach(x=>{if(x.closest('#qa-users') || ['meta-agencia','meta-mes','meta-anio'].includes(x.id))return;if(x.isContentEditable)x.contentEditable='false';else x.disabled=true;});
     document.querySelectorAll('button').forEach(x=>{if(/guardar|generar enlace|limpiar|restaurar respaldo/i.test(x.textContent))x.disabled=true;});
@@ -5608,6 +5612,7 @@ window.addEventListener('load',()=>{
  }
  el('qa-login-retry').onclick=checkAccess;
  el('qa-open-users').onclick=()=>window.open(getReportApiUrl()+'?action=manageUsers','_blank','noopener');
+ el('qa-open-directory').onclick=()=>window.open(getReportApiUrl()+'?action=manageDirectory','_blank','noopener');
  checkAccess();
 })();
 </script>
