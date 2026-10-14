@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+    <script>
+    (() => {
+        const params = new URLSearchParams(location.search);
+        if (['s', 'id', 'r'].some(key => params.has(key)) || params.get('view') === 'agency_report') {
+            document.documentElement.classList.add('qa-public-report');
+        }
+    })();
+    </script>
+    <style>html.qa-public-report #qa-consult-toolbar{display:none!important}</style>
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Formato de Evaluación Digital - Vento Quality Platform</title>
