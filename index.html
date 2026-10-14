@@ -5580,7 +5580,7 @@ window.addEventListener('load',()=>{
                 const output=document.getElementById('shareable-url-output');if(output)output.value='';
                 const agency=document.getElementById('meta-agencia');if(agency&&AGENCIA_CATALOG.length){agency.value=AGENCIA_CATALOG[0].id;qaBlankSnapshot=buildPermanentDraftSnapshot();agency.value='';}
                 qaContextKey='';draftReadyAgency='';lastDraftAgencyLoaded='';qaLoadedPeriodKey='';qaRecoveredDraftKey='';draftDirty=false;
-                displayActiveEvaluationId();calculateTotalScore();
+                displayActiveEvaluationId();calculateTotalScore();updateOutstandingSessionRequirement(0,false);
             }finally{restoringPermanentDraft=false;}
         }
         window.addEventListener('pageshow',event=>{const p=new URLSearchParams(location.search);if(event.persisted&&!p.has('qaAgencia')&&!p.has('id')&&!p.has('s')&&!p.has('r'))resetEvaluationForm(false);});
