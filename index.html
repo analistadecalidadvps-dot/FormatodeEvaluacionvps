@@ -199,6 +199,10 @@
             </div>
         </div>
     </header>
+<div id="qa-consult-toolbar" class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap gap-3 no-print">
+<button type="button" onclick="consultSavedEvaluations(true)" class="bg-blue-700 hover:bg-blue-800 text-white font-bold px-4 py-2 rounded-xl text-sm"><i class="fa-solid fa-magnifying-glass mr-2"></i>Consultar evaluación</button>
+<button type="button" onclick="consultSavedEvaluations()" class="bg-violet-600 hover:bg-violet-700 text-white font-bold px-4 py-2 rounded-xl text-sm"><i class="fa-solid fa-clock-rotate-left mr-2"></i>Evaluaciones guardadas</button>
+</div>
 
     <main id="evaluation-printable-area" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-8 bg-slate-100 pb-6">
 
@@ -516,7 +520,6 @@
             </div>
             <div class="flex flex-wrap items-center gap-3 w-full sm:w-auto">
                 <button onclick="saveDraftManually(event)" class="flex-1 sm:flex-none bg-slate-700 hover:bg-slate-800 text-white font-bold px-5 py-3 rounded-xl text-sm flex items-center justify-center shadow-md transition transform active:scale-95"><i class="fa-solid fa-floppy-disk mr-2 text-base"></i> Guardar borrador</button>
-                <button onclick="consultSavedEvaluations()" class="flex-1 sm:flex-none bg-violet-600 hover:bg-violet-700 text-white font-bold px-5 py-3 rounded-xl text-sm flex items-center justify-center shadow-md transition transform active:scale-95"><i class="fa-solid fa-clock-rotate-left mr-2 text-base"></i> Consultar evaluaciones guardadas</button>
                 <button onclick="uploadToCloud(event)" class="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-3 rounded-xl text-sm flex items-center justify-center shadow-md shadow-blue-600/20 transition transform active:scale-95">
                     <i class="fa-solid fa-cloud-arrow-up mr-2 text-base"></i> Guardar en Nube
                 </button>
@@ -3305,6 +3308,10 @@
         }
 
         function calculateTotalScore() {
+            if(!RUBROS_DATA.some(r=>r.items.some(item=>evalState[item.id]?.status))){
+                const score=document.getElementById('total-score-percent'),badge=document.getElementById('score-status-badge');
+                if(score)score.textContent='—';if(badge)badge.textContent='Sin evaluar';return;
+            }
             const percent = calculateScoreForExport();
             const percentEl = document.getElementById("total-score-percent");
             const badgeEl = document.getElementById("score-status-badge");
@@ -3637,6 +3644,7 @@
         }
 
         function collectFormData() {
+            if(RUBROS_DATA.some(r=>r.items.some(item=>!evalState[item.id]?.status))){alert('Selecciona una respuesta para cada rubro antes de finalizar la evaluación.');return null;}
             const numVal = document.getElementById("meta-num").value || "1";
             const agenciaVal = document.getElementById("meta-agencia").value.trim() || "";
             const asesorVal = document.getElementById("meta-asesor").value.trim() || "";
@@ -4278,9 +4286,10 @@ function qaPrepareNewContext() {
     document.getElementById('qa-history-dialog')?.close();
     displayActiveEvaluationId();
 }
-async function consultSavedEvaluations() {
+async function consultSavedEvaluations(currentPeriodOnly=false) {
     const agencia=document.getElementById('meta-agencia')?.value?.trim();
     if (!AGENCIA_CATALOG.some(a=>a.id===agencia)) {alert('Selecciona primero una agencia válida.');return;}
+    if(currentPeriodOnly&&(!document.getElementById('meta-mes').value||!document.getElementById('meta-anio').value)){alert('Selecciona el mes y el año que deseas consultar.');return;}
     let dialog=document.getElementById('qa-history-dialog');
     if(!dialog){
         dialog=document.createElement('dialog');dialog.id='qa-history-dialog';
@@ -4295,7 +4304,13 @@ async function consultSavedEvaluations() {
     const list=document.getElementById('qa-history-list');list.textContent='Consultando '+agencia+'…';dialog.showModal();
     const key=qaCurrentPeriodKey(), sequence=++qaHistorySequence;
     try {
-        const result=await jsonpRequest('getAgencyHistory',{agencia},20000);
+        let result;
+        if(currentPeriodOnly){
+            const mes=document.getElementById('meta-mes').value,anio=document.getElementById('meta-anio').value;
+            const [formal,draft]=await Promise.all([jsonpRequest('getEvaluationByAgencyPeriod',{agencia,mes,anio},20000),jsonpRequest('getDraft',{agencia,mes,anio},20000)]);
+            if(!formal?.ok||!draft?.ok)throw Error(formal?.error||draft?.error||'No se pudo consultar el periodo');
+            result={ok:true,evaluations:formal.found?[{id:formal.evaluationId,mes,anio}]:[],drafts:draft.found?[{mes,anio}]:[]};
+        }else result=await jsonpRequest('getAgencyHistory',{agencia},20000);
         if(sequence!==qaHistorySequence || key!==qaCurrentPeriodKey())return;
         if(!result?.ok)throw Error(result?.error||'No se pudo consultar el historial.');
         list.replaceChildren();
@@ -4403,6 +4418,7 @@ window.addEventListener('load',()=>{
                 if (data.controlQaDropboxId) qaLinkedEvaluationId = evaluationId;
                 activeEvaluationSaved = true;
                 displayActiveEvaluationId();
+                qaFinishCloudSave();
                 await deletePermanentDraft(data.agencia);
                 alert(`¡Evaluación guardada correctamente en ambos destinos!\n\n✓ Base nativa VENTO QA\n✓ ${verify.concentradoSheet} (fila ${verify.concentradoRow})\n\nFolio: ${evaluationId}`);
             } catch (err) {
@@ -5539,28 +5555,35 @@ window.addEventListener('load',()=>{
             alert("¡Resumen de la evaluación copiado al portapapeles!");
         }
 
-        function resetEvaluationForm() {
-            activeEvaluationId = '';
-            activeEvaluationSaved = false;
-            qaLinkedEvaluationId = '';
-            displayActiveEvaluationId();
-            document.querySelectorAll("input[type='text'], textarea, input[type='url'], input[type='date']").forEach(el => el.value = "");
-            document.getElementById("meta-num").value = "1";
-            document.getElementById("meta-agencia").selectedIndex = 0;
-            document.getElementById("meta-aht").value = "00:10:20";
-            ensureVideoPartCount(1);
-            ensureQuotePartCount(1);
-            setQaEditorHtml('');
-            autoFillAgencyData();
-
-            RUBROS_DATA.forEach(rubro => {
-                rubro.items.forEach(item => {
-                    document.getElementById(`r_${item.id}_cumple`).checked = true;
-                    updateReactiveState(item.id, 'Cumple');
-                });
-            });
-            calculateTotalScore();
+        function qaClearAssignmentUrl() {
+            const url=new URL(window.location.href);
+            [...url.searchParams.keys()].filter(key=>key.startsWith('qa')).forEach(key=>url.searchParams.delete(key));
+            window.history.replaceState(null,'',url.pathname+url.search+url.hash);
         }
+        function qaFinishCloudSave() {
+            clearTimeout(permanentDraftTimer);++draftLoadSequence;
+            draftDirty=false;qaClearAssignmentUrl();
+        }
+        function resetEvaluationForm(ask=true) {
+            if(ask&&draftDirty&&!activeEvaluationSaved&&!confirm('Hay cambios sin guardar. ¿Dejar el formato en blanco?'))return;
+            restoringPermanentDraft=true;
+            try{
+                clearTimeout(permanentDraftTimer);++draftLoadSequence;++qaHistorySequence;
+                qaClearAssignmentUrl();
+                activeEvaluationId='';activeEvaluationSaved=false;qaLinkedEvaluationId='';qaLinkValidatedFor='';qaSelectedVideoId='';qaDirectoryHistoricalLoaded=false;
+                ensureVideoPartCount(1);ensureQuotePartCount(1);
+                document.querySelectorAll('main input:not([type="file"]),main textarea').forEach(el=>{if(el.type==='radio'||el.type==='checkbox')el.checked=false;else el.value='';});
+                document.querySelectorAll('main select[id^="meta-"]').forEach(el=>{if(![...el.options].some(o=>o.value===''))el.insertBefore(new Option('Selecciona…',''),el.firstChild);el.value='';});
+                setQaEditorHtml('');
+                RUBROS_DATA.forEach(r=>r.items.forEach(item=>{evalState[item.id]={status:'',comment:''};document.querySelectorAll(`input[name="item_${item.id}"]`).forEach(el=>el.checked=false);document.getElementById(`justification_box_${item.id}`)?.classList.add('hidden');}));
+                ['shareable-link-container','qa-history-dialog'].forEach(id=>{const el=document.getElementById(id);if(el?.close)el.close();});
+                const output=document.getElementById('shareable-url-output');if(output)output.value='';
+                const agency=document.getElementById('meta-agencia');if(agency&&AGENCIA_CATALOG.length){agency.value=AGENCIA_CATALOG[0].id;qaBlankSnapshot=buildPermanentDraftSnapshot();agency.value='';}
+                qaContextKey='';draftReadyAgency='';lastDraftAgencyLoaded='';qaLoadedPeriodKey='';qaRecoveredDraftKey='';draftDirty=false;
+                displayActiveEvaluationId();calculateTotalScore();
+            }finally{restoringPermanentDraft=false;}
+        }
+        window.addEventListener('pageshow',event=>{const p=new URLSearchParams(location.search);if(event.persisted&&!p.has('qaAgencia')&&!p.has('id')&&!p.has('s')&&!p.has('r'))resetEvaluationForm(false);});
     
         // Integración opcional: precarga desde CONTROL QA mediante parámetros de URL.
         window.addEventListener('load', function () {
@@ -5571,6 +5594,7 @@ window.addEventListener('load',()=>{
             const video = p.get('qaVideoUrl');
             const month = p.get('qaMes');
             const year = p.get('qaAnio');
+            if(!agency&&!p.has('id')&&!p.has('s')&&!p.has('r')){resetEvaluationForm(false);return;}
             if (agency && AGENCIA_CATALOG.some(a => a.id === agency)) {document.getElementById('meta-agencia').value=agency;autoFillAgencyData();}
             if (evaluator) { const el = document.getElementById('meta-qa'); if (el && [...el.options].some(o => o.value === evaluator)) el.value = evaluator; }
             if (video && /^https:\/\//i.test(video)) { const el = document.getElementById('meta-video-url-1'); if (el) el.value = video; }
@@ -5598,8 +5622,8 @@ window.addEventListener('load',()=>{
   try{
    const result=await jsonpRequest('getAccess',{},20000);
    if(!result?.ok) throw Error(result?.error||'No se pudo comprobar el acceso.');
-   const directory=await jsonpRequest('getAgencyDirectory',{},20000);if(!directory?.ok||!Array.isArray(directory.agencies)||!directory.agencies.length)throw Error(directory?.error||'No se pudo cargar el directorio actualizado.');AGENCIA_CATALOG=directory.agencies;const agencyInput=document.getElementById('meta-agencia');const linkedAgency=new URLSearchParams(location.search).get('qaAgencia');if(!agencyInput.value&&linkedAgency&&AGENCIA_CATALOG.some(a=>a.id===linkedAgency))selectAgencyFromSearch(linkedAgency);else if(agencyInput.value&&!qaDirectoryHistoricalLoaded&&!activeEvaluationSaved)autoFillAgencyData();
-   access=result;const qa=document.getElementById('meta-qa');if(qa){(result.evaluatorNames||[]).forEach(name=>{if(!Array.from(qa.options).some(o=>o.value===name))qa.add(new Option(name,name));});if(result.name && !new URLSearchParams(location.search).has('qaEvaluador') && !document.getElementById('meta-agencia').value)qa.value=result.name;}el('qa-login').hidden=true;el('qa-account-bar').hidden=false;
+   const directory=await jsonpRequest('getAgencyDirectory',{},20000);if(!directory?.ok||!Array.isArray(directory.agencies)||!directory.agencies.length)throw Error(directory?.error||'No se pudo cargar el directorio actualizado.');AGENCIA_CATALOG=directory.agencies;const agencyInput=document.getElementById('meta-agencia');const linkedAgency=new URLSearchParams(location.search).get('qaAgencia');if(!agencyInput.value&&linkedAgency&&AGENCIA_CATALOG.some(a=>a.id===linkedAgency))selectAgencyFromSearch(linkedAgency);else if(agencyInput.value&&!qaDirectoryHistoricalLoaded&&!activeEvaluationSaved)autoFillAgencyData();else if(!agencyInput.value)document.getElementById('meta-qa').value='';
+   access=result;const qa=document.getElementById('meta-qa');if(qa){(result.evaluatorNames||[]).forEach(name=>{if(!Array.from(qa.options).some(o=>o.value===name))qa.add(new Option(name,name));});}el('qa-login').hidden=true;el('qa-account-bar').hidden=false;
    document.body.prepend(el('qa-account-bar'));
    el('qa-account-text').textContent=result.email+' · '+({ADMIN:'Administrador',EVALUADOR:'Evaluador',CONSULTA:'Consulta'}[result.role]||'');
    el('qa-open-users').hidden=result.role!=='ADMIN';el('qa-open-directory').hidden=result.role!=='ADMIN';
