@@ -310,7 +310,7 @@ const QA_GOOGLE_TEAM_HTML="<!doctype html><html lang=\"es\"><meta charset=\"utf-
                 <!-- 3. Puesto / Posición -->
                 <div>
                     <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Puesto / Posición</label>
-                    <select id="meta-puesto" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-vento-blue focus:bg-white transition">
+                    <select id="meta-puesto" onchange="qaToggleCustomPuesto()" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-vento-blue focus:bg-white transition">
                         <option value="Vendedor">Vendedor</option>
                         <option value="Subgerente">Subgerente</option>
                         <option value="Gerente">Gerente de Agencia</option>
@@ -323,7 +323,11 @@ const QA_GOOGLE_TEAM_HTML="<!doctype html><html lang=\"es\"><meta charset=\"utf-
                         <option value="Gerente y Vendedor">Gerente y Vendedor</option>
                         <option value="Subgerente y Vendedor">Subgerente y Vendedor</option>
                         <option value="Vendedor Movil">Vendedor Móvil</option>
+                        <option value="Gerente Regional">Gerente Regional</option>
+                        <option value="Gerente Distrital">Gerente Distrital</option>
+                        <option value="__OTRO_PUESTO__">Otro (especificar)</option>
                     </select>
+                    <input type="text" id="meta-puesto-otro" maxlength="120" placeholder="Escribe el puesto o posición" aria-label="Especifica el puesto" class="hidden mt-2 w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-vento-blue focus:bg-white transition">
                 </div>
 
                 <!-- 4. Tiempo AHT -->
@@ -3715,6 +3719,12 @@ const QA_GOOGLE_TEAM_HTML="<!doctype html><html lang=\"es\"><meta charset=\"utf-
             const calcPercent = calculateScoreForExport();
             const requiresSession = calcPercent < 95;
 
+            if (document.getElementById('meta-puesto').value === '__OTRO_PUESTO__' && !qaGetPuesto()) {
+                alert('Escribe el puesto o posición antes de guardar la evaluación.');
+                document.getElementById('meta-puesto-otro').focus();
+                return null;
+            }
+
             // Mandatory Validation Check
             if (!agenciaVal) {
                 alert("Por favor selecciona una Agencia.");
@@ -3812,7 +3822,7 @@ const QA_GOOGLE_TEAM_HTML="<!doctype html><html lang=\"es\"><meta charset=\"utf-
                 regional: regionalVal,
                 region: document.getElementById("meta-region-val").value || agencyObj.region || "",
                 gerenteAgencia: document.getElementById("meta-gerente-agencia").value || "",
-                puesto: document.getElementById("meta-puesto").value || "",
+                puesto: qaGetPuesto() || "",
                 asesor: asesorVal,
                 aht: document.getElementById("meta-aht").value || "00:10:20",
                 mes: document.getElementById("meta-mes").value,
@@ -3936,6 +3946,35 @@ const QA_GOOGLE_TEAM_HTML="<!doctype html><html lang=\"es\"><meta charset=\"utf-
             return `vento_qa_draft_${String(agencia || '').trim()}_${document.getElementById('meta-mes').value}_${document.getElementById('meta-anio').value}`;
         }
 
+        // Puesto personalizado: conserva el valor real en exportaciones y backend.
+        function qaToggleCustomPuesto() {
+            const select = document.getElementById('meta-puesto');
+            const input = document.getElementById('meta-puesto-otro');
+            const custom = select.value === '__OTRO_PUESTO__';
+            input.classList.toggle('hidden', !custom);
+            input.required = custom;
+            if (custom && !input.value.trim()) input.placeholder = 'Escribe el puesto o posición';
+        }
+        function qaGetPuesto() {
+            const select = document.getElementById('meta-puesto');
+            return select.value === '__OTRO_PUESTO__'
+                ? document.getElementById('meta-puesto-otro').value.trim()
+                : select.value;
+        }
+        function qaSetPuesto(value) {
+            const select = document.getElementById('meta-puesto');
+            const input = document.getElementById('meta-puesto-otro');
+            const v = String(value || '');
+            if (v && !Array.from(select.options).some(o => o.value === v)) {
+                select.value = '__OTRO_PUESTO__';
+                input.value = v;
+            } else {
+                select.value = v;
+                input.value = '';
+            }
+            qaToggleCustomPuesto();
+        }
+
         function buildPermanentDraftSnapshot() {
             const agencia = document.getElementById('meta-agencia')?.value?.trim() || '';
             if (!agencia || !AGENCIA_CATALOG.some(a => a.id === agencia)) return null;
@@ -3970,8 +4009,9 @@ const QA_GOOGLE_TEAM_HTML="<!doctype html><html lang=\"es\"><meta charset=\"utf-
                     const el = document.getElementById(id);
                     if (!el || !saved) return;
                     if (saved.type === 'checkbox') el.checked = !!saved.checked;
-                    else if ('value' in saved) el.value = saved.value ?? '';
+                    else if ('value' in saved) { if (id === 'meta-puesto') qaSetPuesto(saved.value); else el.value = saved.value ?? ''; }
                 });
+                qaToggleCustomPuesto();
                 setQaEditorHtml(document.getElementById('comments-calidad')?.value || '');
                 qaDirectoryHistoricalLoaded=true;
                 RUBROS_DATA.forEach(rubro => rubro.items.forEach(item => {
@@ -4174,9 +4214,10 @@ const QA_GOOGLE_TEAM_HTML="<!doctype html><html lang=\"es\"><meta charset=\"utf-
                     const el = document.getElementById(id);
                     if (!el || !saved) return;
                     if (saved.type === 'checkbox') el.checked = !!saved.checked;
-                    else if ('value' in saved) el.value = saved.value ?? '';
+                    else if ('value' in saved) { if (id === 'meta-puesto') qaSetPuesto(saved.value); else el.value = saved.value ?? ''; }
                 });
 
+                qaToggleCustomPuesto();
                 // Restaurar cada reactivo y su comentario sin perder justificaciones.
                 RUBROS_DATA.forEach(rubro => {
                     rubro.items.forEach(item => {
@@ -4289,7 +4330,7 @@ const QA_GOOGLE_TEAM_HTML="<!doctype html><html lang=\"es\"><meta charset=\"utf-
                     'meta-fecha-sesion':data.fechaSesion,'meta-liga-acceso':data.ligaAcceso
                 };
                 if (data.agencia && typeof selectAgencyFromSearch === 'function') selectAgencyFromSearch(data.agencia);
-                Object.entries(fields).forEach(([id,value]) => {const el=document.getElementById(id);if(el && value!==undefined && value!==null) el.value=value;});
+                Object.entries(fields).forEach(([id,value]) => {const el=document.getElementById(id);if(el && value!==undefined && value!==null) { if(id==='meta-puesto') qaSetPuesto(value); else el.value=value; }});
                 const videos=Array.isArray(data.videoUrls)?data.videoUrls:[data.videoUrl||''];
                 ensureVideoPartCount(Math.max(1,videos.length));
                 videos.forEach((url,i)=>{const el=document.getElementById('meta-video-url-'+(i+1));if(el)el.value=url;});
@@ -5266,7 +5307,7 @@ window.addEventListener('load',()=>{
                             </tr>
                             <tr>
                                 <td style="padding:4px; font-weight:700; color:#475569;">Puesto / Posición:</td>
-                                <td style="padding:4px; font-weight:600; color:#0f172a;">${document.getElementById('meta-puesto').value || 'N/A'}</td>
+                                <td style="padding:4px; font-weight:600; color:#0f172a;">${qaGetPuesto() || 'N/A'}</td>
                                 <td style="padding:4px; font-weight:700; color:#475569;">Fecha Sesión:</td>
                                 <td style="padding:4px; font-weight:600; color:#0f172a;">${document.getElementById('meta-fecha-sesion').value || 'N/A'}</td>
                             </tr>
@@ -5634,6 +5675,7 @@ window.addEventListener('load',()=>{
                 ensureVideoPartCount(1);ensureQuotePartCount(1);
                 document.querySelectorAll('main input:not([type="file"]),main textarea').forEach(el=>{if(el.type==='radio'||el.type==='checkbox')el.checked=false;else el.value='';});
                 document.querySelectorAll('main select[id^="meta-"]').forEach(el=>{if(![...el.options].some(o=>o.value===''))el.insertBefore(new Option('Selecciona…',''),el.firstChild);el.value='';});
+                qaToggleCustomPuesto();
                 setQaEditorHtml('');
                 RUBROS_DATA.forEach(r=>r.items.forEach(item=>{evalState[item.id]={status:'',comment:''};document.querySelectorAll(`input[name="item_${item.id}"]`).forEach(el=>el.checked=false);document.getElementById(`justification_box_${item.id}`)?.classList.add('hidden');}));
                 ['shareable-link-container','qa-history-dialog'].forEach(id=>{const el=document.getElementById(id);if(el?.close)el.close();});
